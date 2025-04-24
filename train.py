@@ -15,6 +15,7 @@ import utils.misc as misc
 from utils.misc import NativeScalerWithGradNormCount as NativeScaler
 import swin_mae
 from utils.engine_pretrain import train_one_epoch
+from utils.data import GeoWebDataset, UsualTransform
 
 
 def get_args_parser():
@@ -23,10 +24,11 @@ def get_args_parser():
     # common parameters
     parser.add_argument('--batch_size', default=96, type=int)
     parser.add_argument('--epochs', default=400, type=int)
+    parser.add_argument('--epoch_length', type=int)
     parser.add_argument('--save_freq', default=400, type=int)
     parser.add_argument('--checkpoint_encoder', default='', type=str)
     parser.add_argument('--checkpoint_decoder', default='', type=str)
-    parser.add_argument('--data_path', default=r'C:\文件\数据集\腮腺对比学习数据集\三通道合并\concat\train', type=str)  # fill in the dataset path here
+    parser.add_argument('--data_path', type=str)  # fill in the dataset path here
     parser.add_argument('--mask_ratio', default=0.75, type=float,
                         help='Masking ratio (percentage of removed patches).')
 
@@ -35,6 +37,8 @@ def get_args_parser():
                         help='Name of model to train')
     parser.add_argument('--input_size', default=224, type=int,
                         help='images input size')
+    parser.add_argument('--in_chans', default=4, type=int,
+                        help='images input channels')
     parser.add_argument('--norm_pix_loss', action='store_true',
                         help='Use (per-patch) normalized pixels as targets for computing loss')
     parser.set_defaults(norm_pix_loss=False)
@@ -57,14 +61,13 @@ def get_args_parser():
                         help='path where to tensorboard log')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
-    parser.add_argument('--seed', default=0, type=int)
+    parser.add_argument('--seed', default=222, type=int)
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--num_workers', default=8, type=int)
     parser.add_argument('--pin_mem', action='store_true',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
     parser.set_defaults(pin_mem=True)
-
     return parser
 
 
@@ -79,17 +82,24 @@ def main(args):
     cudnn.benchmark = True
 
     # Defining data augmentation
-    transform_train = transforms.Compose([
-        transforms.Resize((args.input_size, args.input_size)),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor()
-    ])
+    transform_train = UsualTransform(input_size=args.input_size)
+    # transform_train = transforms.Compose([
+    #     transforms.Resize((args.input_size, args.input_size)),
+    #     transforms.RandomHorizontalFlip(),
+    #     transforms.ToTensor()
+    # ])
 
     # Set dataset
-    dataset_train = datasets.ImageFolder(args.data_path, transform=transform_train)
-    sampler_train = torch.utils.data.RandomSampler(dataset_train)
+    # dataset_train = datasets.ImageFolder(args.data_path, transform=transform_train)
+    dataset_train = GeoWebDataset(root=args.data_path,
+                                  n_bands=args.in_chans,
+                                  augmentations=transform_train,
+                                  num_nodes=1,
+                                  num_shards=1,
+                                  imgs_per_shard=3)
+    # sampler_train = torch.utils.data.RandomSampler(dataset_train)
     data_loader_train = torch.utils.data.DataLoader(
-        dataset_train, sampler=sampler_train,
+        dataset_train,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
@@ -104,7 +114,7 @@ def main(args):
         log_writer = None
 
     # Set model
-    model = swin_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, mask_ratio=args.mask_ratio)
+    model = swin_mae.__dict__[args.model](in_chans=args.in_chans, norm_pix_loss=args.norm_pix_loss, mask_ratio=args.mask_ratio)
     model.to(device)
     model_without_ddp = model
 

@@ -23,6 +23,7 @@ class SwinMAE(nn.Module):
         super().__init__()
         self.mask_ratio = mask_ratio
         assert img_size % patch_size == 0
+        self.in_chans=in_chans
         self.num_patches = (img_size // patch_size) ** 2
         self.patch_size = patch_size
         self.norm_pix_loss = norm_pix_loss
@@ -79,9 +80,11 @@ class SwinMAE(nn.Module):
         assert imgs.shape[2] == imgs.shape[3] and imgs.shape[2] % p == 0
 
         h = w = imgs.shape[2] // p
-        x = imgs.reshape(shape=(imgs.shape[0], 3, h, p, w, p))
+        # x = imgs.reshape(shape=(imgs.shape[0], 3, h, p, w, p))
+        x = imgs.reshape(shape=(imgs.shape[0], self.in_chans, h, p, w, p))
         x = torch.einsum('nchpwq->nhwpqc', x)
-        x = x.reshape(imgs.shape[0], h * w, p ** 2 * 3)
+        # x = x.reshape(imgs.shape[0], h * w, p ** 2 * 3)
+        x = x.reshape(imgs.shape[0], h * w, p ** 2 * self.in_chans)
         return x
 
     def unpatchify(self, x):
@@ -93,9 +96,11 @@ class SwinMAE(nn.Module):
         h = w = int(x.shape[1] ** .5)
         assert h * w == x.shape[1]
 
-        x = x.reshape(shape=(x.shape[0], h, w, p, p, 3))
+        # x = x.reshape(shape=(x.shape[0], h, w, p, p, 3))
+        x = x.reshape(shape=(x.shape[0], h, w, p, p, self.in_chans))
         x = torch.einsum('nhwpqc->nchpwq', x)
-        imgs = x.reshape(x.shape[0], 3, h * p, h * p)
+        # imgs = x.reshape(x.shape[0], 3, h * p, h * p)
+        imgs = x.reshape(x.shape[0], self.in_chans, h * p, h * p)
         return imgs
 
     def window_masking(self, x: torch.Tensor, r: int = 4,
@@ -133,7 +138,7 @@ class SwinMAE(nn.Module):
                 index_keep = torch.cat([index_keep, index_keep_part + int(L ** 0.5) * i + j], dim=1)
 
         index_all = np.expand_dims(range(L), axis=0).repeat(B, axis=0) 
-        index_mask = np.zeros([B, int(L - index_keep.shape[-1])], dtype=np.int) 
+        index_mask = np.zeros([B, int(L - index_keep.shape[-1])], dtype=int)
         for i in range(B):
             index_mask[i] = np.setdiff1d(index_all[i], index_keep.cpu().numpy()[i], assume_unique=True)
         index_mask = torch.tensor(index_mask, device=x.device)
@@ -249,12 +254,40 @@ class SwinMAE(nn.Module):
         return loss, pred, mask
 
 
-def swin_mae(**kwargs):
+def mae_swin_tiny_patch4_window7_224(**kwargs):
     model = SwinMAE(
-        img_size=224, patch_size=4, in_chans=3,
+        img_size=224, patch_size=4,  # in_chans=3,
         decoder_embed_dim=768,
-        depths=(2, 2, 2, 2), embed_dim=96, num_heads=(3, 6, 12, 24),
+        depths=(2, 2, 6, 2), embed_dim=96, num_heads=(3, 6, 12, 24),
         window_size=7, qkv_bias=True, mlp_ratio=4,
-        drop_path_rate=0.1, drop_rate=0, attn_drop_rate=0,
+        drop_path_rate=0.2, drop_rate=0, attn_drop_rate=0,
         norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
+
+
+def mae_swin_small_patch4_window7_224(**kwargs):
+    model = SwinMAE(
+        img_size=224, patch_size=4,  # in_chans=3,
+        decoder_embed_dim=768,
+        depths=(2, 2, 18, 2), embed_dim=96, num_heads=(3, 6, 12, 24),
+        window_size=7, qkv_bias=True, mlp_ratio=4,
+        drop_path_rate=0.3, drop_rate=0, attn_drop_rate=0,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+    return model
+
+
+def mae_swin_base_patch4_window7_224(**kwargs):
+    model = SwinMAE(
+        img_size=224, patch_size=4,  # in_chans=3,
+        decoder_embed_dim=768,
+        depths=(2, 2, 18, 2), embed_dim=128, num_heads=(4, 8, 16, 32),
+        window_size=7, qkv_bias=True, mlp_ratio=4,
+        drop_path_rate=0.3, drop_rate=0, attn_drop_rate=0,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+    return model
+
+
+# recommended archs
+swin_tiny = mae_swin_tiny_patch4_window7_224
+swin_small = mae_swin_small_patch4_window7_224
+swin_base = mae_swin_base_patch4_window7_224
